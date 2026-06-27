@@ -1,0 +1,6 @@
+# Local test artifacts
+.env
+.env.*
+*.log
+data/
+repo/

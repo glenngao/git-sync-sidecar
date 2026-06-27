@@ -1,0 +1,40 @@
+# Example: attaching git-sync-sidecar to an existing service.
+#
+# Drop the build context into your project (e.g. as a git submodule), then
+# share a volume between your main service and the sidecar. The sidecar
+# owns all git operations on that volume.
+#
+# This example shows a generic "app" service + the sidecar.
+services:
+  app:
+    image: your-app-image
+    volumes:
+      - repo-data:/repo          # app reads/writes files here
+    working_dir: /repo
+
+  git-sync:
+    build: ./git-sync-sidecar    # or: image: ghcr.io/<you>/git-sync-sidecar:<tag>
+    environment:
+      # --- required ---
+      GIT_REPO_URL: ${SYNC_REPO_URL}
+      GIT_SYNC_PATH: /repo
+      # --- optional (defaults shown) ---
+      GIT_BASE_BRANCH: main
+      GIT_SYNC_BRANCH_PREFIX: auto/sync
+      GIT_SYNC_SCHEDULE: "0 3 * * *"   # daily at 03:00 UTC
+      AUTO_OPEN_PR: "true"
+      GIT_AUTHOR_NAME: "git-sync-sidecar"
+      GIT_AUTHOR_EMAIL: "git-sync-sidecar@local"
+      GIT_IGNORE_GLOB: "data/raw/
+node_modules/
+*.log"
+      # --- auth (provide ONE) ---
+      GIT_TOKEN: ${SYNC_TOKEN}          # HTTPS PAT (recommended; also enables gh PRs)
+      # GIT_SSH_KEY: ${SYNC_SSH_KEY}    # PEM body of a private key, SSH mode
+      TZ: UTC
+    volumes:
+      - repo-data:/repo          # SAME volume as the app service
+    restart: unless-stopped
+
+volumes:
+  repo-data:
