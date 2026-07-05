@@ -19,6 +19,9 @@ services:
       GIT_REPO_URL: ${SYNC_REPO_URL}
       GIT_SYNC_PATH: /repo
       # --- optional (defaults shown) ---
+      # Branch to sync against: PRs target it AND its updates are pulled into
+      # the working tree each cycle. Set per deploy environment (edge → edge,
+      # production → main). Pass it through from your .env, e.g. ${SYNC_BASE_BRANCH}.
       GIT_BASE_BRANCH: main
       GIT_SYNC_BRANCH_PREFIX: auto/sync
       GIT_SYNC_SCHEDULE: "0 3 * * *"   # daily at 03:00 UTC

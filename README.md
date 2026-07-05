@@ -35,10 +35,17 @@ service just reads and writes files — no git knowledge required.
 Each sync cycle:
 
 1. `git fetch origin <base>` — get the latest base branch tip.
-2. `git add -A` — stage all working-tree changes (respecting ignore rules).
-3. If nothing changed → done.
-4. If changed → switch to (or create) `<prefix>-<YYYY-MM-DD>`, commit, push.
-5. If `AUTO_OPEN_PR=true` — open or update a PR against the base branch.
+2. `git merge origin/<base> -X ours` — pull the base branch's updates into the
+   working tree so deploys (new code pushed to base) reach the container. The
+   `-X ours` strategy option means: on a conflicting hunk the working tree's
+   version wins, but non-conflicting base changes merge in normally — the
+   service's in-flight edits are never lost. (If the working tree is too dirty
+   for git to even attempt the merge, it aborts and skips this cycle.)
+3. `git add -A` — stage all working-tree changes (respecting ignore rules),
+   now including the base updates that just merged in.
+4. If nothing changed → done.
+5. If changed → switch to (or create) `<prefix>-<YYYY-MM-DD>`, commit, push.
+6. If `AUTO_OPEN_PR=true` — open or update a PR against the base branch.
 
 The **base branch is never committed to directly**, so it stays clean for
 human review. Same-day re-runs append to the same dated branch.
@@ -79,7 +86,7 @@ All configuration is via environment variables.
 |----------|:--------:|---------|-------------|
 | `GIT_REPO_URL` | ✅ | — | Git remote URL (SSH `git@…` or HTTPS). |
 | `GIT_SYNC_PATH` | ✅ | — | Shared-volume path holding the git repo. |
-| `GIT_BASE_BRANCH` | ❌ | `main` | Branch the sync branches off of / PRs target. |
+| `GIT_BASE_BRANCH` | ❌ | `main` | Branch the sync branches off of, PRs target, **and whose updates are pulled into the working tree each cycle**. Set per deploy environment (e.g. edge deploy → `edge`, production → `main`). |
 | `GIT_SYNC_BRANCH_PREFIX` | ❌ | `auto/sync` | Pushed branch = `<prefix>-<YYYY-MM-DD>`. |
 | `GIT_SYNC_SCHEDULE` | ❌ | `0 3 * * *` | Cron expression (UTC). Daily 03:00 by default. |
 | `AUTO_OPEN_PR` | ❌ | `true` | Open/update a PR after pushing. |

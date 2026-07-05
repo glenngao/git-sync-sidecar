@@ -89,11 +89,31 @@ fi
 
 # Make sure HEAD points at the base branch initially, WITHOUT discarding
 # any working-tree changes that the main service may have produced.
+#
+# On restart the working tree may be sitting on a stale auto/sync-<date> branch.
+# Get onto the base branch so subsequent sync.sh pulls (git merge origin/<base>)
+# can fast-forward / merge cleanly. Working-tree edits are preserved via stash.
 cd "$GIT_SYNC_PATH"
 git fetch origin "$GIT_BASE_BRANCH" --quiet || true
-if ! git rev-parse --verify --quiet HEAD >/dev/null; then
-    # Brand-new checkout with no commits on the current ref: align to base.
-    git checkout "$GIT_BASE_BRANCH" --quiet || true
+
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+if [ "$CURRENT_BRANCH" != "$GIT_BASE_BRANCH" ]; then
+    # Try a plain checkout; if the working tree has local changes that block it,
+    # stash them, checkout, then pop. If pop conflicts, drop the stash (keep the
+    # working tree as checked out) and log — the agent's edits are already on the
+    # last auto/sync branch via a prior sync cycle, so losing the stash is safe.
+    if ! git checkout "$GIT_BASE_BRANCH" --quiet 2>/dev/null; then
+        log "Working tree dirty; stashing to checkout $GIT_BASE_BRANCH."
+        if git stash --quiet --include-untracked; then
+            git checkout "$GIT_BASE_BRANCH" --quiet || true
+            if ! git stash pop --quiet 2>/dev/null; then
+                log "WARN: stash pop conflicted after checkout $GIT_BASE_BRANCH; dropping stash (agent edits are preserved on the prior auto/sync branch)."
+                git stash drop --quiet 2>/dev/null || true
+            fi
+        else
+            log "WARN: could not checkout $GIT_BASE_BRANCH or stash; staying on $CURRENT_BRANCH."
+        fi
+    fi
 fi
 
 # -------------------------------------------------------------------

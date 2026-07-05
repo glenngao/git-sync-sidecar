@@ -88,6 +88,23 @@ BASE_SHA="$(git rev-parse --short "origin/$GIT_BASE_BRANCH")"
 TODAY="$(date +%Y-%m-%d)"
 BRANCH="${GIT_SYNC_BRANCH_PREFIX}-${TODAY}"
 
+# Pull the base branch's updates into the working tree so deploys (new code
+# pushed to base) reach the container without a manual merge. Conflict policy:
+# `-X ours` (strategy OPTION, not `-s ours`) — on a conflicting hunk the working
+# tree's version wins, but non-conflicting base changes still merge in. The
+# agent's in-flight edits are therefore never lost, while base updates that
+# touch files/lines the agent hasn't edited flow through automatically.
+if git merge "origin/${GIT_BASE_BRANCH}" -X ours --no-edit --quiet; then
+    log "Pulled origin/${GIT_BASE_BRANCH} into working tree (-X ours)."
+else
+    # merge can fail when the working tree has uncommitted changes that git
+    # refuses to overwrite (the `-X ours` option only resolves content conflicts,
+    # not the "would overwrite local changes" precondition). Abort cleanly and
+    # skip this cycle — never force, never clobber the agent's edits.
+    git merge --abort 2>/dev/null || true
+    log "WARN: pull origin/${GIT_BASE_BRANCH} failed (dirty working tree?); skipped this cycle."
+fi
+
 # Refresh ignore rules: append extra patterns so generated artifacts
 # (e.g. data/raw/, node_modules/) never leak into the auto commit.
 if [ -n "${GIT_IGNORE_GLOB:-}" ]; then
