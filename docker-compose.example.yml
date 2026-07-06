@@ -23,6 +23,9 @@ services:
       # the working tree each cycle. Set per deploy environment (edge → edge,
       # production → main). Pass it through from your .env, e.g. ${SYNC_BASE_BRANCH}.
       GIT_BASE_BRANCH: main
+      # Work branch = <prefix>-<base> (e.g. auto/sync-main). One stable branch
+      # per base branch; a rolling PR tracks it. Override to namespace multiple
+      # writers in the same env (e.g. auto/sync-<host> → auto/sync-<host>-<base>).
       GIT_SYNC_BRANCH_PREFIX: auto/sync
       GIT_SYNC_SCHEDULE: "0 3 * * *"   # daily at 03:00 UTC
       AUTO_OPEN_PR: "true"

@@ -19,8 +19,14 @@ log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] [entrypoint] $*"; }
 : "${GIT_SYNC_PATH:?GIT_SYNC_PATH is required (the shared volume path)}"
 : "${GIT_REPO_URL:?GIT_REPO_URL is required}"
 : "${GIT_BASE_BRANCH:=main}"
+: "${GIT_SYNC_BRANCH_PREFIX:=auto/sync}"
 : "${GIT_SYNC_SCHEDULE:=0 3 * * *}"   # default: daily at 03:00 UTC
 : "${SYNC_HOST_ID:=$(hostname)}"
+
+# The fixed work branch for this deploy: <prefix>-<base> (e.g. auto/sync-edge).
+# This is the stable home for in-flight edits; it is never deleted and never
+# switches day-to-day. See sync.sh for the full rationale.
+WORK_BRANCH="${GIT_SYNC_BRANCH_PREFIX}-${GIT_BASE_BRANCH}"
 
 mkdir -p "$GIT_SYNC_PATH"
 cd "$GIT_SYNC_PATH"
@@ -87,31 +93,42 @@ else
     log "Clone complete."
 fi
 
-# Make sure HEAD points at the base branch initially, WITHOUT discarding
-# any working-tree changes that the main service may have produced.
+# Make sure HEAD points at the FIXED WORK BRANCH on startup, WITHOUT
+# discarding any working-tree changes that the main service may have produced.
 #
-# On restart the working tree may be sitting on a stale auto/sync-<date> branch.
-# Get onto the base branch so subsequent sync.sh pulls (git merge origin/<base>)
-# can fast-forward / merge cleanly. Working-tree edits are preserved via stash.
+# On restart the working tree may be sitting on a stale branch (e.g. an old
+# dated auto/sync-<date> branch from the prior model, or the base branch).
+# Get onto $WORK_BRANCH so the agent keeps working on the same stable branch
+# across restarts. Working-tree edits are preserved via stash if needed.
 cd "$GIT_SYNC_PATH"
 git fetch origin "$GIT_BASE_BRANCH" --quiet || true
+git fetch origin "$WORK_BRANCH" --quiet 2>/dev/null || true
 
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
-if [ "$CURRENT_BRANCH" != "$GIT_BASE_BRANCH" ]; then
+if [ "$CURRENT_BRANCH" != "$WORK_BRANCH" ]; then
+    # Ensure the work branch exists locally (create from origin/<base> if brand new).
+    if ! git show-ref --verify --quiet "refs/heads/$WORK_BRANCH"; then
+        if git show-ref --verify --quiet "refs/remotes/origin/$WORK_BRANCH"; then
+            git branch "$WORK_BRANCH" "origin/$WORK_BRANCH" --quiet 2>/dev/null || true
+        else
+            git branch "$WORK_BRANCH" "origin/$GIT_BASE_BRANCH" --quiet 2>/dev/null || true
+            log "Seeded new work branch $WORK_BRANCH from origin/$GIT_BASE_BRANCH."
+        fi
+    fi
     # Try a plain checkout; if the working tree has local changes that block it,
     # stash them, checkout, then pop. If pop conflicts, drop the stash (keep the
     # working tree as checked out) and log — the agent's edits are already on the
-    # last auto/sync branch via a prior sync cycle, so losing the stash is safe.
-    if ! git checkout "$GIT_BASE_BRANCH" --quiet 2>/dev/null; then
-        log "Working tree dirty; stashing to checkout $GIT_BASE_BRANCH."
+    # work branch via a prior sync cycle, so losing the stash is safe.
+    if ! git checkout "$WORK_BRANCH" --quiet 2>/dev/null; then
+        log "Working tree dirty; stashing to checkout $WORK_BRANCH."
         if git stash --quiet --include-untracked; then
-            git checkout "$GIT_BASE_BRANCH" --quiet || true
+            git checkout "$WORK_BRANCH" --quiet || true
             if ! git stash pop --quiet 2>/dev/null; then
-                log "WARN: stash pop conflicted after checkout $GIT_BASE_BRANCH; dropping stash (agent edits are preserved on the prior auto/sync branch)."
+                log "WARN: stash pop conflicted after checkout $WORK_BRANCH; dropping stash (agent edits are preserved on the work branch)."
                 git stash drop --quiet 2>/dev/null || true
             fi
         else
-            log "WARN: could not checkout $GIT_BASE_BRANCH or stash; staying on $CURRENT_BRANCH."
+            log "WARN: could not checkout $WORK_BRANCH or stash; staying on $CURRENT_BRANCH."
         fi
     fi
 fi
